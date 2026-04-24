@@ -1,0 +1,401 @@
+# =============================================================================
+# TravelHub — API Gateway OpenAPI Specification Template
+# =============================================================================
+# TEMPLATE: Los placeholders ${VAR} son reemplazados por 07-gateway.sh
+# usando envsubst con las URLs del ambiente activo.
+#
+# Placeholders:
+#   ${GATEWAY_HOST}              -> hostname del gateway (se obtiene dinamicamente)
+#   ${JWKS_URI}                  -> URL del endpoint JWKS de user-services
+#   ${USER_SERVICES_URL}         -> URL de Cloud Run: user-services
+#   ${SEARCH_SERVICES_URL}       -> URL de Cloud Run: search-services
+#   ${BOOKING_SERVICES_URL}      -> URL de Cloud Run: booking-services
+#   ${PAYMENTS_SERVICES_URL}     -> URL de Cloud Run: payments-services
+#   ${INVENTORY_SERVICES_URL}    -> URL de Cloud Run: inventory-services
+#   ${NOTIFICATION_SERVICES_URL} -> URL de Cloud Run: notification-services
+#   ${PMS_SERVICES_URL}          -> URL de Cloud Run: pms-integration-services
+#   ${CART_SERVICES_URL}         -> URL de Cloud Run: shopping-cart-services
+# =============================================================================
+
+swagger: "2.0"
+info:
+  title: "TravelHub API Gateway"
+  version: "1.0.0"
+  description: |
+    Gateway de entrada para TravelHub. Valida JWT a nivel de infraestructura
+    y rutea a microservicios en Cloud Run.
+
+host: "${GATEWAY_HOST}"
+basePath: "/"
+schemes:
+  - "https"
+
+# =============================================================================
+# Configuracion de seguridad JWT
+# =============================================================================
+securityDefinitions:
+  travelhub_jwt:
+    authorizationUrl: ""
+    flow: "implicit"
+    type: "oauth2"
+    x-google-issuer: "https://auth.travelhub.app"
+    x-google-audiences: "travelhub-api"
+    x-google-jwks_uri: "${JWKS_URI}"
+
+# =============================================================================
+# Rutas — Microservicios
+# =============================================================================
+paths:
+
+  # ---------- Rutas PUBLICAS (sin JWT) ----------
+
+  /api/v1/auth/login:
+    post:
+      operationId: "authLogin"
+      summary: "Login — no requiere JWT"
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Login exitoso, retorna JWT"
+
+  /api/v1/auth/register:
+    post:
+      operationId: "authRegister"
+      summary: "Registro de usuario — no requiere JWT"
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        201:
+          description: "Usuario registrado"
+
+  /api/v1/auth/refresh:
+    post:
+      operationId: "authRefresh"
+      summary: "Refresh token — no requiere JWT (usa refresh token)"
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Nuevo access token emitido"
+
+  /health:
+    get:
+      operationId: "healthCheck"
+      summary: "Health check — no requiere JWT"
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Servicio saludable"
+
+  /.well-known/jwks.json:
+    get:
+      operationId: "getJwks"
+      summary: "Endpoint JWKS publico"
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "JWKS document"
+
+  # ---------- Rutas PROTEGIDAS (requieren JWT valido) ----------
+
+  /api/v1/auth/me:
+    get:
+      operationId: "getUserInfo"
+      summary: "Informacion del usuario autenticado"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Informacion del usuario autenticado"
+        401:
+          description: "JWT invalido o expirado — rechazado por gateway"
+    put:
+      operationId: "updateUserProfile"
+      summary: "Actualizar perfil del usuario autenticado"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Perfil actualizado"
+        401:
+          description: "JWT invalido o expirado — rechazado por gateway"
+
+  /api/v1/auth/mfa/setup:
+    post:
+      operationId: "mfaSetup"
+      summary: "Generar secreto TOTP para MFA"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "Secreto TOTP generado"
+        401:
+          description: "JWT invalido o expirado — rechazado por gateway"
+
+  /api/v1/auth/mfa/verify:
+    post:
+      operationId: "mfaVerify"
+      summary: "Verificar codigo TOTP y activar MFA"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        200:
+          description: "MFA activado"
+        401:
+          description: "JWT invalido o expirado — rechazado por gateway"
+
+  /api/v1/search/{path}:
+    get:
+      operationId: "searchServices"
+      summary: "Busqueda de hospedajes"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${SEARCH_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Resultados de busqueda"
+        401:
+          description: "JWT invalido o expirado — rechazado por gateway"
+
+  /api/v1/bookings/{path}:
+    get:
+      operationId: "bookingServicesGet"
+      summary: "Consultar reservas"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${BOOKING_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Reservas del usuario"
+        401:
+          description: "JWT invalido"
+    post:
+      operationId: "bookingServicesPost"
+      summary: "Crear reserva"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${BOOKING_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        201:
+          description: "Reserva creada"
+        401:
+          description: "JWT invalido"
+
+  /api/v1/payments/{path}:
+    post:
+      operationId: "paymentServices"
+      summary: "Procesar pago"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${PAYMENTS_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Pago procesado"
+        401:
+          description: "JWT invalido"
+
+  /api/v1/inventory/{path}:
+    get:
+      operationId: "inventoryServicesGet"
+      summary: "Consultar inventario"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${INVENTORY_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Inventario"
+        401:
+          description: "JWT invalido"
+    put:
+      operationId: "inventoryServicesPut"
+      summary: "Actualizar inventario"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${INVENTORY_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Inventario actualizado"
+        401:
+          description: "JWT invalido"
+
+  /api/v1/notifications/{path}:
+    get:
+      operationId: "notificationServices"
+      summary: "Notificaciones"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${NOTIFICATION_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Notificaciones"
+        401:
+          description: "JWT invalido"
+
+  /api/v1/pms/{path}:
+    get:
+      operationId: "pmsServicesGet"
+      summary: "Integracion PMS"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${PMS_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Datos PMS"
+        401:
+          description: "JWT invalido"
+    post:
+      operationId: "pmsServicesPost"
+      summary: "Webhook PMS"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${PMS_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "PMS sincronizado"
+        401:
+          description: "JWT invalido"
+
+  /api/v1/cart/{path}:
+    get:
+      operationId: "cartServicesGet"
+      summary: "Carrito de compras"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${CART_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Carrito"
+        401:
+          description: "JWT invalido"
+    post:
+      operationId: "cartServicesPost"
+      summary: "Agregar al carrito"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${CART_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        201:
+          description: "Item agregado"
+        401:
+          description: "JWT invalido"
+
+  # ---------- Rutas ADMIN (requieren JWT + validacion RBAC en backend) ----------
+
+  /api/v1/admin/{path}:
+    get:
+      operationId: "adminGet"
+      summary: "Panel admin — JWT validado en gateway, RBAC en backend"
+      security:
+        - travelhub_jwt: []
+      x-google-backend:
+        address: "${USER_SERVICES_URL}"
+        path_translation: APPEND_PATH_TO_ADDRESS
+      parameters:
+        - name: path
+          in: path
+          required: true
+          type: string
+      responses:
+        200:
+          description: "Datos admin"
+        401:
+          description: "JWT invalido"
+        403:
+          description: "Rol insuficiente — rechazado por Chain of Responsibility"

@@ -1,0 +1,25 @@
+#terraform
+stacks/bucket_backend/.terraform/*
+stacks/main/.terraform/*
+
+# Ignorar lock files de Terraform
+stacks/bucket_backend/.terraform.lock.hcl
+stacks/main/.terraform.lock.hcl
+
+# Ignorar carpetas .terraform
+stacks/bucket_backend/.terraform/
+stacks/main/.terraform/
+
+# Ignorar planes y estados de Terraform
+stacks/bucket_backend/.tfplan
+stacks/main/.tfplan
+
+# Ignorar tfstate y backup
+stacks/bucket_backend/terraform.tfstate
+stacks/bucket_backend/terraform.tfstate.backup
+
+#Ignorar cache de terraform
+.terraform
+.terraform.lock.hcl
+.terraform.lock.hcl
+.terraform/providers/registry.terraform.io/hashicorp/aws/6.21.0/darwin_arm64/terraform-provider-aws_v6.21.0_x5 .terraform/

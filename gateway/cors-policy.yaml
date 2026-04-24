@@ -1,0 +1,44 @@
+# =============================================================================
+# TravelHub — CORS Policy para React SPA
+# =============================================================================
+# Configuracion CORS para permitir requests desde el frontend React.
+#
+# IMPORTANTE: Actualizar allowed_origins con el dominio real del SPA
+# una vez desplegado.
+# =============================================================================
+
+cors_policy:
+  # Origenes permitidos (React SPA)
+  allowed_origins:
+    - "https://travelhub.app"
+    - "https://www.travelhub.app"
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
+  # Metodos HTTP permitidos
+  allowed_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "PATCH"
+    - "OPTIONS"
+
+  # Headers permitidos en requests
+  allowed_headers:
+    - "Authorization"
+    - "Content-Type"
+    - "Accept"
+    - "Origin"
+    - "X-Requested-With"
+
+  # Headers expuestos en responses
+  exposed_headers:
+    - "X-Request-Id"
+    - "X-RateLimit-Remaining"
+
+  # Tiempo de cache del preflight (OPTIONS) en segundos
+  max_age: 3600
+
+  # Permitir envio de credentials (cookies, Authorization header)
+  allow_credentials: true
