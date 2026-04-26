@@ -11,7 +11,7 @@ Ejecutado contra el ambiente DEV de GCP (`gen-lang-client-0930444414`).
 | Auth público (register/login/refresh) | ✅ | Flujo completo OK; refresh rechaza access tokens (401) |
 | Auth protegido (`/me` GET y PUT) | ✅ | JWT validado por gateway → backend con `X-Forwarded-Authorization` |
 | MFA (setup/verify/login) | ✅ | TOTP activado, 428 sin código, login con MFA setea `mfa_verified=true` |
-| PMS Integration end-to-end | ⚠️ ver hallazgo #1 | Funciona vía Cloud Run directo. **Gateway no rutea `/api/v1/pms/*`** |
+| PMS Integration end-to-end | ✅ resuelto 2026-04-26 | Gateway rutea `/api/v1/pms/*` correctamente (config `travelhub-config-20260426-pms-fix`) |
 | PMS Sync (Kafka → worker → DB) | ✅ | Worker consume y actualiza `sync_events.status` con `processed_at` |
 | Idempotencia webhook | ✅ | Reenvío del mismo `event_id` no re-procesa |
 | Gateway JWT validation | ✅ | 401 sin token, 401 mal formado, 401 firma alterada, 403 audience inválida |
@@ -103,29 +103,27 @@ POST /api/v1/auth/login (12 reqs consecutivos)      → 401 x 12 (esperado: 429 
 
 ## Hallazgos
 
-### #1 ❌ Gateway no rutea `/api/v1/pms/*`
+### #1 ✅ Gateway no rutea `/api/v1/pms/*` — **RESUELTO 2026-04-26**
 
-`gateway/openapi-spec.yaml` declara la ruta con backend
-`pms-integration-services-PLACEHOLDER.a.run.app`, que no es la URL real
-(`pms-integration-services-ridyy4wz4q-uc.a.run.app`).
+**Causa raíz:** el spec compilado tenía
+`pms-integration-services-PLACEHOLDER.a.run.app` en vez de la URL real.
 
-**Impacto:** todas las requests PMS via gateway/LB devuelven 404. El backend
-funciona correctamente (verificado vía Cloud Run directo).
+**Fix aplicado:**
+1. Actualizado `config/environments/dev.env` — añadidas URLs reales para
+   `PMS_SERVICES_URL`, `SEARCH_SERVICES_URL`, `BOOKING_SERVICES_URL`.
+2. Render con envsubst sobre `gateway/openapi-spec.template.yaml`.
+3. Nuevo api-config bajo `travelhub-api` legacy:
+   `travelhub-config-20260426-pms-fix`.
+4. `gcloud api-gateway gateways update travelhub-gateway --api-config=...`
+5. Snapshot `gateway/openapi-spec.yaml` actualizado.
 
-**Fix:**
-1. Actualizar `gateway/openapi-spec.yaml` líneas 295–331: reemplazar
-   `pms-integration-services-PLACEHOLDER.a.run.app` por
-   `pms-integration-services-ridyy4wz4q-uc.a.run.app`.
-2. Re-deploy del gateway:
-   ```bash
-   gcloud api-gateway api-configs create <new-config> \
-     --api=travelhub-api \
-     --openapi-spec=gateway/openapi-spec.yaml \
-     --project=gen-lang-client-0930444414
-   gcloud api-gateway gateways update travelhub-gateway \
-     --api=travelhub-api --api-config=<new-config> \
-     --location=us-central1 --project=gen-lang-client-0930444414
-   ```
+**Validación:**
+```
+GET https://apitravelhub.site/api/v1/pms/availability  →  401  (antes: 404)
+GET https://apitravelhub.site/api/v1/pms/properties    →  401  (antes: 404)
+```
+
+`401` = gateway encuentra ruta, rutea al backend que pide JWT (correcto).
 
 ### #2 ❌ Cloud Armor sin reglas WAF
 

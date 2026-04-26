@@ -1,12 +1,22 @@
 # =============================================================================
-# TravelHub — API Gateway OpenAPI Specification
+# TravelHub — API Gateway OpenAPI Specification (DEV — snapshot desplegado)
 # =============================================================================
-# Configura GCP API Gateway con validacion JWT nativa.
-# El gateway valida: firma RS256, issuer, audience, expiracion.
-# Los claims de negocio (role, mfa_verified) los valida el backend.
+# NO EDITAR DIRECTAMENTE. Este archivo es un snapshot de la spec efectiva
+# generada por `scripts/08-gateway.sh` a partir de `openapi-spec.template.yaml`
+# usando envsubst con las URLs de `config/environments/dev.env`.
 #
-# IMPORTANTE: Reemplazar PLACEHOLDER en las URLs de x-google-backend
-# con los hashes reales de Cloud Run una vez desplegados los servicios.
+# Última generación: 2026-04-26 (api-config: travelhub-config-20260426-pms-fix)
+# Para regenerar tras cambios en URLs:
+#   source config/environments/dev.env && bash scripts/08-gateway.sh
+#
+# Backends activos en DEV (gen-lang-client-0930444414):
+#   user-services             -> https://user-services-ridyy4wz4q-uc.a.run.app
+#   search-services (skel)    -> https://dev-search-service-app-service-ridyy4wz4q-uc.a.run.app
+#   booking-services (skel)   -> https://dev-booking-service-app-service-ridyy4wz4q-uc.a.run.app
+#   pms-integration-services  -> https://pms-integration-services-ridyy4wz4q-uc.a.run.app
+#
+# Backends NO desplegados (placeholder devuelve 503):
+#   payments-services, inventory-services, notification-services, shopping-cart-services
 # =============================================================================
 
 swagger: "2.0"
@@ -163,7 +173,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://search-services-PLACEHOLDER.a.run.app"
+        address: "https://dev-search-service-app-service-ridyy4wz4q-uc.a.run.app"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -183,7 +193,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://booking-services-PLACEHOLDER.a.run.app"
+        address: "https://dev-booking-service-app-service-ridyy4wz4q-uc.a.run.app"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -201,7 +211,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://booking-services-PLACEHOLDER.a.run.app"
+        address: "https://dev-booking-service-app-service-ridyy4wz4q-uc.a.run.app"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -221,7 +231,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://payments-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-payments-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -241,7 +251,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://inventory-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-inventory-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -259,7 +269,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://inventory-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-inventory-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -279,7 +289,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://notification-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-notification-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -299,7 +309,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://pms-integration-services-PLACEHOLDER.a.run.app"
+        address: "https://pms-integration-services-ridyy4wz4q-uc.a.run.app"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -317,7 +327,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://pms-integration-services-PLACEHOLDER.a.run.app"
+        address: "https://pms-integration-services-ridyy4wz4q-uc.a.run.app"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -337,7 +347,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://shopping-cart-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-cart-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path
@@ -355,7 +365,7 @@ paths:
       security:
         - travelhub_jwt: []
       x-google-backend:
-        address: "https://shopping-cart-services-PLACEHOLDER.a.run.app"
+        address: "https://placeholder-cart-services.example.com"
         path_translation: APPEND_PATH_TO_ADDRESS
       parameters:
         - name: path

@@ -54,7 +54,29 @@ Estas URLs son del entorno de desarrollo. En producción serán distintas.
 - **Entrada (LB):** `https://apitravelhub.site` (IP estática 136.110.223.156, cert SSL managed)
 - **Gateway (directo):** `https://travelhub-gateway-1yvtqj7r.uc.gateway.dev`
 - **user-services:** `https://user-services-ridyy4wz4q-uc.a.run.app`
-- Los demás microservicios tienen PLACEHOLDER en `gateway/openapi-spec.yaml` — actualizar cuando se desplieguen
+- **pms-integration-services:** `https://pms-integration-services-ridyy4wz4q-uc.a.run.app` (gateway lo rutea desde 2026-04-26)
+- Los demás microservicios siguen como placeholder en el spec del gateway hasta que se desplieguen.
+
+## Convención de naming vs estado actual del proyecto DEV
+
+El IaC en `scripts/` y `config/environments/` está parametrizado para crear todos los recursos con prefijo `${PREFIX}-*` donde `PREFIX="${ENV}-travelhub"`. En un despliegue limpio quedaría:
+
+| Ambiente | PREFIX | Ejemplo de recursos |
+|---|---|---|
+| dev | `dev-travelhub` | `dev-travelhub-vpc`, `dev-travelhub-db`, `dev-travelhub-gateway`, `dev-travelhub-kafka`, ... |
+| prod | `prod-travelhub` | `prod-travelhub-vpc`, `prod-travelhub-db`, `prod-travelhub-gateway`, ... |
+
+**Sin embargo, el proyecto actual `gen-lang-client-0930444414` tiene recursos legacy sin prefijo** (creados antes de la convención):
+
+```
+travelhub-vpc, travelhub-db, travelhub-security-policy,
+travelhub-backend-service, travelhub-gateway, travelhub-api,
+travelhub-gateway-neg, travelhub-kafka (VM), ...
+```
+
+**Decisión (2026-04-26):** No renombrar el legacy aquí. Aprovechar la migración a `secret-lambda-491419-p2` para desplegar todo desde cero con `bash deploy-all.sh` y la convención correcta.
+
+> **Implicación práctica:** si ejecutas un script de scripts/0X-*.sh contra el proyecto actual, el script no encontrará el recurso `dev-travelhub-*` esperado y creará uno nuevo en paralelo (esto pasó con `08-gateway.sh` el 2026-04-26 antes del fix manual). Para el proyecto actual usa `gcloud` directo apuntando a los nombres legacy.
 
 ## Flujo de red completo
 
