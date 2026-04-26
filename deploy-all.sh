@@ -32,9 +32,10 @@ STEPS=(
   "04-private-access.sh:Configurar acceso privado"
   "05-cloud-armor.sh:Crear politica Cloud Armor"
   "06-database.sh:Configurar Cloud SQL PostgreSQL"
-  "07-gateway.sh:Desplegar API Gateway"
-  "08-load-balancer.sh:Configurar Load Balancer"
-  "09-tests.sh:Ejecutar tests de validacion"
+  "07-kafka.sh:Desplegar Kafka VM (Compute Engine)"
+  "08-gateway.sh:Desplegar API Gateway"
+  "09-load-balancer.sh:Configurar Load Balancer"
+  "10-tests.sh:Ejecutar tests de validacion"
 )
 
 TOTAL=${#STEPS[@]}

@@ -1,0 +1,687 @@
+{
+  "info": {
+    "name": "TravelHub GCP - Plataforma completa",
+    "_postman_id": "travelhub-gcp-full",
+    "description": "Coleccion unificada para todos los servicios de TravelHub desplegados en GCP.\n\nCubre las 4 capas de seguridad (Cloud Armor / VPC Firewall / API Gateway JWT / Chain of Responsibility) y los 3 microservicios desplegados (user-services, pms-integration-services, pms-sync-worker).\n\n## Flujo de red\n\n```\napitravelhub.site (LB + Cloud Armor) → API Gateway (valida JWT RS256) → Cloud Run\n```\n\n## Variables clave\n\n- `lb_url` : entrada publica via Load Balancer + Cloud Armor (https://apitravelhub.site)\n- `gateway_url` : gateway directo (https://travelhub-gateway-1yvtqj7r.uc.gateway.dev)\n- `user_services_url` : Cloud Run user-services directo\n- `pms_integration_url` : Cloud Run pms-integration directo\n- `pms_sync_worker_url` : Cloud Run pms-sync-worker directo\n\n## Flujo recomendado\n\n1. **Health & Infra** → verifica que las 5 superficies responden\n2. **Auth - publico** → register, login (los tokens quedan guardados automaticamente)\n3. **Auth - protegido** → me, update, mfa\n4. **PMS Integration** → properties, webhook, availability, sync-status\n5. **PMS Sync Worker** → health (no tiene API de negocio)\n6. **Seguridad - Cloud Armor** → SQLi, XSS, LFI, rate limit\n7. **Seguridad - Gateway JWT** → 401 sin token / token invalido\n8. **Microservicios pendientes** → referencia de rutas placeholder\n\nGrupo 9 - MISW4501 / MISW4502 - Universidad de los Andes",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "lb_url", "value": "https://apitravelhub.site", "type": "string"},
+    {"key": "gateway_url", "value": "https://travelhub-gateway-1yvtqj7r.uc.gateway.dev", "type": "string"},
+    {"key": "user_services_url", "value": "https://user-services-ridyy4wz4q-uc.a.run.app", "type": "string"},
+    {"key": "pms_integration_url", "value": "https://pms-integration-services-ridyy4wz4q-uc.a.run.app", "type": "string"},
+    {"key": "pms_sync_worker_url", "value": "https://pms-sync-worker-ridyy4wz4q-uc.a.run.app", "type": "string"},
+    {"key": "base_url", "value": "{{lb_url}}", "type": "string", "description": "URL principal usada por la mayoria de requests. Por defecto el LB. Cambiar a {{gateway_url}} para saltar Cloud Armor."},
+    {"key": "user_email", "value": "viajero+gcp@travelhub.com", "type": "string"},
+    {"key": "user_password", "value": "securepass123", "type": "string"},
+    {"key": "user_username", "value": "viajero_gcp", "type": "string"},
+    {"key": "access_token", "value": "", "type": "string"},
+    {"key": "refresh_token", "value": "", "type": "string"},
+    {"key": "mfa_secret", "value": "", "type": "string"},
+    {"key": "hotel_id", "value": "", "type": "string"},
+    {"key": "property_id", "value": "", "type": "string"},
+    {"key": "event_id", "value": "", "type": "string"},
+    {"key": "room_id", "value": "", "type": "string"},
+    {"key": "hotel_admin_token", "value": "", "type": "string", "description": "JWT con role=hotel_admin emitido por user-services. Se obtiene tras login de un usuario con rol admin_hotel."},
+    {"key": "platform_admin_token", "value": "", "type": "string", "description": "JWT con role=platform_admin."}
+  ],
+  "item": [
+    {
+      "name": "1. Health & Infraestructura",
+      "description": "Verifica que cada superficie HTTP responde. Util para diagnostico cuando algo falla: si LB ✅ pero gateway ❌, el problema es Cloud Run; si gateway ✅ pero LB ❌, el problema es Cloud Armor / cert SSL.",
+      "item": [
+        {
+          "name": "Health via LB (apitravelhub.site)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{lb_url}}/health", "host": ["{{lb_url}}"], "path": ["health"]},
+            "description": "Pasa por: DNS → IP estatica 136.110.223.156 → LB → Cloud Armor → API Gateway → user-services."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('user-services healthy', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.status).to.eql('healthy');",
+            "  pm.expect(j.service).to.eql('user-services');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Health via Gateway directo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{gateway_url}}/health", "host": ["{{gateway_url}}"], "path": ["health"]},
+            "description": "Saltea Cloud Armor. Util para aislar si un fallo es del WAF o del backend."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));"
+          ]}}]
+        },
+        {
+          "name": "Health user-services (Cloud Run directo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{user_services_url}}/health", "host": ["{{user_services_url}}"], "path": ["health"]},
+            "description": "Verifica el contenedor Cloud Run sin pasar por gateway/LB."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Service y version', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.service).to.eql('user-services');",
+            "  pm.expect(j).to.have.property('version');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Health pms-integration-services (Cloud Run directo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{pms_integration_url}}/health", "host": ["{{pms_integration_url}}"], "path": ["health"]},
+            "description": "Reporta estado de DB y Kafka."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Service y dependencias', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.service).to.eql('pms-integration-services');",
+            "  pm.expect(j).to.have.property('database');",
+            "  pm.expect(j).to.have.property('kafka');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Health pms-sync-worker (Cloud Run directo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{pms_sync_worker_url}}/health", "host": ["{{pms_sync_worker_url}}"], "path": ["health"]},
+            "description": "El worker no esta detras del gateway (no se accede por API), unicamente lo expone Cloud Run para liveness."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Service pms-sync-worker', () => {",
+            "  pm.expect(pm.response.json().service).to.eql('pms-sync-worker');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "JWKS via Gateway",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{base_url}}/.well-known/jwks.json", "host": ["{{base_url}}"], "path": [".well-known", "jwks.json"]},
+            "description": "El gateway proxy-ea al endpoint JWKS de user-services. Las claves publicas RS256 se exponen para que el gateway pueda validar firmas."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('JWKS valido', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.keys).to.be.an('array').that.is.not.empty;",
+            "  const k = j.keys[0];",
+            "  pm.expect(k.kty).to.eql('RSA');",
+            "  pm.expect(k.alg).to.eql('RS256');",
+            "  pm.expect(k.kid).to.eql('travelhub-key-1');",
+            "});"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "2. Auth - Publico (sin JWT)",
+      "description": "Endpoints en `/api/v1/auth/{login,register,refresh}` configurados como publicos en `gateway/openapi-spec.yaml`. No requieren `Authorization`.",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"username\": \"{{user_username}}\",\n  \"nombre\": \"Usuario GCP\",\n  \"password\": \"{{user_password}}\",\n  \"telefono\": \"+57 300 0000000\",\n  \"pais\": \"CO\",\n  \"idioma\": \"es\",\n  \"moneda_preferida\": \"COP\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/register", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "register"]},
+            "description": "Crea usuario rol `viajero` (mapeado a `traveler` en JWT). Si ya existe, devuelve 409."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201 o 409 (idempotencia)', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+            "if (pm.response.code === 201) {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j).to.have.property('id');",
+            "  pm.expect(j.rol).to.eql('viajero');",
+            "  pm.expect(j.mfa_activo).to.eql(false);",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "Login (guarda tokens)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"{{user_password}}\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"]},
+            "description": "Login. Guarda automaticamente `access_token` y `refresh_token` en variables de coleccion."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Tokens emitidos', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j).to.have.property('access_token');",
+            "  pm.expect(j).to.have.property('refresh_token');",
+            "  pm.expect(j.token_type).to.eql('bearer');",
+            "  pm.expect(j.expires_in).to.eql(900);",
+            "});",
+            "const j = pm.response.json();",
+            "pm.collectionVariables.set('access_token', j.access_token);",
+            "pm.collectionVariables.set('refresh_token', j.refresh_token);"
+          ]}}]
+        },
+        {
+          "name": "Refresh (renueva tokens)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/refresh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "refresh"]},
+            "description": "Renueva el par access+refresh. Si se envia un access en lugar del refresh, retorna 401."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.collectionVariables.set('access_token', j.access_token);",
+            "pm.collectionVariables.set('refresh_token', j.refresh_token);"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "3. Auth - Protegido (JWT validado por gateway)",
+      "description": "El gateway valida la firma RS256 antes de proxear. El backend recibe el JWT en `X-Forwarded-Authorization` y vuelve a decodificarlo (sin verificar) para extraer claims.",
+      "item": [
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Perfil completo sin secretos', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j).to.have.property('id');",
+            "  pm.expect(j).to.have.property('email');",
+            "  pm.expect(j).to.not.have.property('hashed_password');",
+            "  pm.expect(j).to.not.have.property('mfa_secret');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"nombre\": \"Usuario GCP Actualizado\",\n  \"telefono\": \"+57 311 1234567\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"]},
+            "description": "Solo se permiten `nombre`, `password`, `telefono`. Cualquier otro campo es ignorado por el schema."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Campos actualizados', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.nombre).to.eql('Usuario GCP Actualizado');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "MFA Setup",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/auth/mfa/setup", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "mfa", "setup"]},
+            "description": "Genera secret base32 (32 chars). Guarda `mfa_secret` para usar en /verify."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Secret y QR URI', () => {",
+            "  const j = pm.response.json();",
+            "  pm.expect(j.secret).to.have.lengthOf(32);",
+            "  pm.expect(j.qr_uri).to.include('otpauth://totp/TravelHub:');",
+            "});",
+            "pm.collectionVariables.set('mfa_secret', pm.response.json().secret);"
+          ]}}]
+        },
+        {
+          "name": "MFA Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"totp_code\": \"REEMPLAZAR_CON_CODIGO_TOTP\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/mfa/verify", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "mfa", "verify"]},
+            "description": "Reemplaza el codigo TOTP. Generador rapido en bash: \npython3 -c 'import pyotp; print(pyotp.TOTP(\"<mfa_secret>\").now())'\n\nVentana de validez: ±30s (`valid_window=1`)."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('MFA activado', () => {",
+            "  pm.expect(pm.response.json().message).to.eql('MFA activado exitosamente');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Login con MFA (despues de verificar)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"{{user_password}}\",\n  \"totp_code\": \"REEMPLAZAR_CON_CODIGO_TOTP\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"]},
+            "description": "Login con MFA activo. Sin `totp_code` retorna 428."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "const j = pm.response.json();",
+            "pm.collectionVariables.set('access_token', j.access_token);",
+            "pm.collectionVariables.set('refresh_token', j.refresh_token);"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "4. PMS Integration (via Gateway)",
+      "description": "Endpoints `/api/v1/pms/*` que el gateway rutea a pms-integration-services. RBAC en backend: traveler solo `GET /availability`, hotel_admin/platform_admin todo.",
+      "item": [
+        {
+          "name": "Crear PMSProperty (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"hotelbeds\",\n  \"pms_property_id\": \"HB-GCP-001\",\n  \"webhook_secret_hash\": \"my-webhook-secret-for-hmac-validation\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties"]},
+            "description": "Requiere JWT con role `hotel_admin` o `platform_admin`. La combinacion (pms_provider + pms_property_id) debe ser unica."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201 o 409 (ya existe)', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+            "if (pm.response.code === 201) {",
+            "  pm.collectionVariables.set('property_id', pm.response.json().id);",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "Listar PMSProperties",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200 o 403 (rol traveler)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));"
+          ]}}]
+        },
+        {
+          "name": "Detalle PMSProperty",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties/{{property_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties", "{{property_id}}"]}
+          }
+        },
+        {
+          "name": "Actualizar PMSProperty",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"status\": \"inactive\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties/{{property_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties", "{{property_id}}"]}
+          }
+        },
+        {
+          "name": "Eliminar PMSProperty (soft)",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties/{{property_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties", "{{property_id}}"]},
+            "description": "Soft delete: cambia status a `inactive`, no elimina el registro."
+          }
+        },
+        {
+          "name": "Webhook - availability_update (JWT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"event_id\": \"{{event_id}}\",\n  \"event_type\": \"availability_update\",\n  \"pms_provider\": \"hotelbeds\",\n  \"pms_property_id\": \"HB-GCP-001\",\n  \"timestamp\": \"2026-04-25T10:00:00Z\",\n  \"data\": {\n    \"room_id\": \"room-suite-001\",\n    \"room_type\": \"Suite\",\n    \"dates\": [\n      {\"date\": \"2026-06-01\", \"available_units\": 3, \"rate\": 250.00, \"currency\": \"USD\"}\n    ]\n  }\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/pms/webhook", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "webhook"]},
+            "description": "Webhook autenticado con JWT (admin). Responde 202 + `{event_id, status: queued}`."
+          },
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "pm.collectionVariables.set('event_id', 'gcp-evt-' + Date.now());"
+            ]}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": [
+              "pm.test('Status 202', () => pm.response.to.have.status(202));",
+              "pm.test('Evento queued', () => {",
+              "  const j = pm.response.json();",
+              "  pm.expect(j.status).to.eql('queued');",
+              "});",
+              "if (pm.response.code === 202) pm.collectionVariables.set('event_id', pm.response.json().event_id);"
+            ]}}
+          ]
+        },
+        {
+          "name": "Webhook - rate_update (JWT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"event_id\": \"{{event_id}}\",\n  \"event_type\": \"rate_update\",\n  \"pms_provider\": \"hotelbeds\",\n  \"pms_property_id\": \"HB-GCP-001\",\n  \"timestamp\": \"2026-04-25T12:00:00Z\",\n  \"data\": {\n    \"room_id\": \"room-standard-001\",\n    \"rates\": [\n      {\"date_from\": \"2026-06-01\", \"date_to\": \"2026-06-30\", \"price\": 180.00, \"currency\": \"USD\"}\n    ]\n  }\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/pms/webhook", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "webhook"]}
+          },
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "pm.collectionVariables.set('event_id', 'gcp-rate-' + Date.now());"
+            ]}}
+          ]
+        },
+        {
+          "name": "Webhook - HMAC (PMS externo, sin JWT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "X-PMS-Provider", "value": "hotelbeds"},
+              {"key": "X-PMS-Signature", "value": "REEMPLAZAR_CON_HMAC_SHA256_DEL_BODY"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"event_id\": \"{{event_id}}\",\n  \"event_type\": \"availability_update\",\n  \"pms_provider\": \"hotelbeds\",\n  \"pms_property_id\": \"HB-GCP-001\",\n  \"timestamp\": \"2026-04-25T10:00:00Z\",\n  \"data\": {\"room_id\": \"r1\"}\n}"},
+            "url": {"raw": "{{pms_integration_url}}/api/v1/pms/webhook", "host": ["{{pms_integration_url}}"], "path": ["api", "v1", "pms", "webhook"]},
+            "description": "Llamada directa al Cloud Run de pms-integration (no via gateway, ya que el gateway exige JWT). El backend valida la firma HMAC con `webhook_secret_hash` almacenado en pms_properties.\n\nFirma: `HMAC-SHA256(body, webhook_secret_hash).hex()`"
+          }
+        },
+        {
+          "name": "Consultar disponibilidad",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {
+              "raw": "{{base_url}}/api/v1/pms/availability?hotel_id={{hotel_id}}&date_from=2026-06-01&date_to=2026-06-30",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pms", "availability"],
+              "query": [
+                {"key": "hotel_id", "value": "{{hotel_id}}"},
+                {"key": "date_from", "value": "2026-06-01"},
+                {"key": "date_to", "value": "2026-06-30"}
+              ]
+            },
+            "description": "Unico endpoint PMS accesible para `traveler`."
+          }
+        },
+        {
+          "name": "Sync Status",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/pms/sync-status/{{event_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "sync-status", "{{event_id}}"]},
+            "description": "Estados: received → queued → processing → completed/failed."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. PMS Sync Worker",
+      "description": "Worker Kafka. NO esta detras del gateway: solo expone /health para Cloud Run. Los mensajes ingresan via topic `pms-sync-queue`. Esta carpeta documenta el contrato de mensajes (ver coleccion dedicada en miso-travelhub-pms-sync-worker para ejemplos completos).",
+      "item": [
+        {
+          "name": "Health pms-sync-worker",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{pms_sync_worker_url}}/health", "host": ["{{pms_sync_worker_url}}"], "path": ["health"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Worker healthy', () => {",
+            "  pm.expect(pm.response.json().service).to.eql('pms-sync-worker');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "[REF] Contrato Kafka SyncCommand",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{pms_sync_worker_url}}/_simulate/kafka", "host": ["{{pms_sync_worker_url}}"], "path": ["_simulate", "kafka"]},
+            "body": {"mode": "raw", "raw": "{\n  \"event_id\": \"f47ac10b-58cc-4372-a567-0e02b2c3d479\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"hotelbeds\",\n  \"pms_property_id\": \"HB-GCP-001\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\"PMS-ROOM-001\": \"{{room_id}}\"},\n    \"dates\": [\n      {\"pms_room_id\": \"PMS-ROOM-001\", \"fecha\": \"2026-07-01\", \"unidades_disponibles\": 5}\n    ]\n  }\n}"},
+            "description": "Solo de referencia. El worker NO expone `/_simulate/kafka`. Para enviar mensajes reales, publicar al topic `pms-sync-queue`. Ver `miso-travelhub-pms-sync-worker/pms-sync-worker.postman_collection.json` para mas event_types (rate_update, property_sync) y casos de error."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Seguridad - Cloud Armor (solo via LB)",
+      "description": "Cloud Armor opera en el borde del Load Balancer. Estos requests deben fallar con 403 (WAF) o 429 (rate limit). Si se ejecutan via gateway directo se saltean Cloud Armor y pueden devolver 200/401.",
+      "item": [
+        {
+          "name": "SQLi blocked (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{lb_url}}/api/v1/search/hotels?q=1' OR 1=1--",
+              "host": ["{{lb_url}}"],
+              "path": ["api", "v1", "search", "hotels"],
+              "query": [{"key": "q", "value": "1' OR 1=1--"}]
+            },
+            "description": "OWASP CRS regla 1000 sqli-v33-stable. Cloud Armor responde 403 antes de tocar el backend."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('SQLi bloqueado por WAF', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "XSS blocked (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{lb_url}}/api/v1/search/hotels?q=<script>alert(1)</script>",
+              "host": ["{{lb_url}}"],
+              "path": ["api", "v1", "search", "hotels"],
+              "query": [{"key": "q", "value": "<script>alert(1)</script>"}]
+            }
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('XSS bloqueado por WAF', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "LFI blocked (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{lb_url}}/api/v1/search/../../etc/passwd", "host": ["{{lb_url}}"], "path": ["api", "v1", "search", "..", "..", "etc", "passwd"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('LFI bloqueado por WAF', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "RFI blocked (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{lb_url}}/api/v1/search?file=http://evil.com/shell.php",
+              "host": ["{{lb_url}}"],
+              "path": ["api", "v1", "search"],
+              "query": [{"key": "file", "value": "http://evil.com/shell.php"}]
+            }
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('RFI bloqueado', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "Login rate limit (correr 12 veces -> 429)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"test@test.com\",\n  \"password\": \"wrong\"\n}"},
+            "url": {"raw": "{{lb_url}}/api/v1/auth/login", "host": ["{{lb_url}}"], "path": ["api", "v1", "auth", "login"]},
+            "description": "Cloud Armor regla 2100: rate limit 10 req/min en /api/v1/auth/login. Despues de 10 requests dentro de 60s deberia devolver 429.\n\nUso: ejecutar este request con Postman Runner 12 veces consecutivas."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Login responde con 401 o 429', () => pm.expect(pm.response.code).to.be.oneOf([401, 429]));",
+            "if (pm.response.code === 429) pm.test('Rate limit hit', () => pm.expect(pm.response.code).to.eql(429));"
+          ]}}]
+        },
+        {
+          "name": "Trafico normal -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{lb_url}}/.well-known/jwks.json", "host": ["{{lb_url}}"], "path": [".well-known", "jwks.json"]},
+            "description": "Smoke test: trafico legitimo no bloqueado por Cloud Armor."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Trafico normal pasa', () => pm.response.to.have.status(200));"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "7. Seguridad - Gateway JWT",
+      "description": "El API Gateway valida la firma RS256, issuer y audience del JWT. Estos casos deben rechazarse antes de llegar al backend.",
+      "item": [
+        {
+          "name": "Endpoint protegido sin token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('401 sin token', () => pm.response.to.have.status(401));"
+          ]}}]
+        },
+        {
+          "name": "Endpoint protegido con token invalido -> 401",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer token.invalido.aqui"}],
+            "url": {"raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"]}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('401 con token mal formado', () => pm.response.to.have.status(401));"
+          ]}}]
+        },
+        {
+          "name": "Endpoint protegido con audience equivocada -> 401",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0IiwiYXVkIjoid3JvbmctYXVkaWVuY2UiLCJpc3MiOiJodHRwczovL2F1dGgudHJhdmVsaHViLmFwcCJ9.fakesig"}],
+            "url": {"raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"]},
+            "description": "JWT con `aud != travelhub-api` debe ser rechazado por el gateway."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('401 audience equivocada', () => pm.response.to.have.status(401));"
+          ]}}]
+        },
+        {
+          "name": "RBAC traveler en /pms/properties -> 403",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/pms/properties", "host": ["{{base_url}}"], "path": ["api", "v1", "pms", "properties"]},
+            "description": "El gateway valida la firma. El backend (RBACFilter) rechaza traveler en este endpoint."
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('403 con role=traveler', () => pm.expect(pm.response.code).to.be.oneOf([403, 200]));",
+            "// 200 si el access_token es de un admin; 403 si es un traveler"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "8. Microservicios pendientes (placeholder en gateway)",
+      "description": "Estas rutas ya estan declaradas en `gateway/openapi-spec.yaml` con backend `*-PLACEHOLDER.a.run.app`. Cuando los microservicios se desplieguen hay que actualizar el gateway. Por ahora devuelven errores de upstream.",
+      "item": [
+        {
+          "name": "Search (placeholder)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/search/hotels", "host": ["{{base_url}}"], "path": ["api", "v1", "search", "hotels"]}
+          }
+        },
+        {
+          "name": "Bookings (placeholder)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/bookings/me", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "me"]}
+          }
+        },
+        {
+          "name": "Payments (placeholder)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{access_token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"booking_id\": \"booking-123\",\n  \"amount\": 100.00,\n  \"currency\": \"USD\"\n}"},
+            "url": {"raw": "{{base_url}}/api/v1/payments/charge", "host": ["{{base_url}}"], "path": ["api", "v1", "payments", "charge"]}
+          }
+        },
+        {
+          "name": "Inventory (placeholder)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/inventory/rooms", "host": ["{{base_url}}"], "path": ["api", "v1", "inventory", "rooms"]}
+          }
+        },
+        {
+          "name": "Notifications (placeholder)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/notifications/unread", "host": ["{{base_url}}"], "path": ["api", "v1", "notifications", "unread"]}
+          }
+        },
+        {
+          "name": "Cart (placeholder)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/cart/me", "host": ["{{base_url}}"], "path": ["api", "v1", "cart", "me"]}
+          }
+        },
+        {
+          "name": "Admin (placeholder con RBAC)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{platform_admin_token}}"}],
+            "url": {"raw": "{{base_url}}/api/v1/admin/dashboard", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "dashboard"]},
+            "description": "JWT validado por gateway, RBAC en backend. Requiere role=platform_admin (o `mfa_verified=true` segun MFAFilter)."
+          }
+        }
+      ]
+    }
+  ]
+}

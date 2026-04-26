@@ -40,6 +40,17 @@ create_fw_rule() {
   log_success "Regla '${rule_name}' creada"
 }
 
+# ── REGLA -1: Permitir IAP (SSH + Kafka UI) hacia la VM de Kafka ──
+# Prioridad 50 < 100 (deny-ssh) → tiene precedencia. Solo aplica al tag de la VM.
+create_fw_rule "${PREFIX}-fw-allow-iap-kafka" \
+  "Allow IAP tunnel to Kafka VM (SSH:22 and Kafka UI:8080)" \
+  --direction=INGRESS \
+  --priority=50 \
+  --action=ALLOW \
+  --rules=tcp:22,tcp:8080 \
+  --source-ranges=35.235.240.0/20 \
+  --target-tags="${KAFKA_VM_NAME}"
+
 # ── REGLA 0: Bloquear SSH desde internet ──
 create_fw_rule "${PREFIX}-fw-deny-ssh" \
   "Block SSH access from internet" \
@@ -132,6 +143,7 @@ echo ""
 log_success "Reglas de firewall configuradas"
 echo ""
 echo "Ingress rules:"
+echo "  [P50]    ALLOW IAP -> Kafka VM (22,8080)       ${PREFIX}-fw-allow-iap-kafka"
 echo "  [P100]   DENY  SSH desde internet              ${PREFIX}-fw-deny-ssh"
 echo "  [P1000]  ALLOW HTTPS (443) -> Load Balancer    ${PREFIX}-fw-allow-https-lb"
 echo "  [P1100]  ALLOW GCP Health Checks               ${PREFIX}-fw-allow-health-checks"

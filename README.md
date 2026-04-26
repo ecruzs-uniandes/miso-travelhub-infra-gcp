@@ -228,6 +228,51 @@ Accesible unicamente desde subnet-services a traves del VPC connector. Sin acces
 
 ---
 
+### Kafka VM — Compute Engine (broker self-managed)
+
+**Recurso:** `${PREFIX}-kafka` (ej. `dev-travelhub-kafka`)
+
+| Campo | Valor |
+|---|---|
+| Tipo de maquina | `e2-small` (2 vCPU burstable, 2 GB RAM) |
+| OS | Ubuntu 22.04 LTS |
+| Disco | 20 GB pd-balanced |
+| Subnet | `subnet-data` |
+| IP privada | `10.10.3.3` (dev) / `10.20.3.3` (prod) — fija via `--private-network-ip` |
+| IP publica | Ninguna — acceso via IAP tunnel |
+| Tags | `data-layer`, `${KAFKA_VM_NAME}` |
+| Firewall | `fw-allow-iap-kafka` (IAP → 22 + 8080), `fw-allow-svc-to-data` (microservicios → 9092) |
+| Bootstrap servers | Almacenado en Secret Manager: `${PREFIX}-kafka-bootstrap-servers` |
+
+Levantada via `docker compose` (instalado por el startup-script):
+
+| Container | Imagen | Puerto | Funcion |
+|---|---|---|---|
+| `travelhub-zookeeper` | `confluentinc/cp-zookeeper:7.6.0` | 2181 | Coordinador (interno) |
+| `travelhub-kafka` | `confluentinc/cp-kafka:7.6.0` | 9092 / 29092 | Broker. `KAFKA_ADVERTISED_LISTENERS` se autocompleta con la IP interna desde metadata |
+| `travelhub-kafka-init` | `confluentinc/cp-kafka:7.6.0` | — | Crea topics al primer boot |
+| `travelhub-kafka-ui` | `provectuslabs/kafka-ui:latest` | 8080 | Admin UI accesible via IAP tunnel |
+
+**Topics:**
+
+| Topic | Particiones | Replication | Productor | Consumidor |
+|---|---|---|---|---|
+| `pms-sync-queue` | 3 | 1 | pms-integration-services (webhook PMS) | pms-sync-worker |
+| `pms-sync-dlq` | 1 | 1 | pms-sync-worker (dead-letter) | — |
+
+**Scripts:** `scripts/07-kafka.sh` (deploy), `scripts/lib/kafka-startup.sh` (startup-script de la VM).
+
+**Acceso al UI** (debug/admin):
+
+```bash
+gcloud compute start-iap-tunnel <vm> 8080 \
+  --local-host-port=localhost:8080 \
+  --zone=${KAFKA_VM_ZONE} --project=${GCP_PROJECT_ID}
+# luego abrir http://localhost:8080
+```
+
+---
+
 ## Estructura del Repositorio
 
 ```
@@ -248,9 +293,25 @@ uniandes-pf-infra-gcp/
 │   ├── deploy-gateway.sh           # Despliegue del API Gateway
 │   ├── deploy-load-balancer.sh     # IP estatica + LB + NEG + Cloud Armor
 │   └── deploy-cloud-armor.sh       # Asociar Cloud Armor (standalone, sin LB)
+├── scripts/                         # Pipeline parametrizado por env (dev/prod)
+│   ├── 01-enable-apis.sh
+│   ├── 02-vpc-setup.sh
+│   ├── 03-firewall-rules.sh
+│   ├── 04-private-access.sh
+│   ├── 05-cloud-armor.sh
+│   ├── 06-database.sh
+│   ├── 07-kafka.sh                 # Kafka VM (Compute Engine)
+│   ├── 08-gateway.sh
+│   ├── 09-load-balancer.sh
+│   ├── 10-tests.sh
+│   └── lib/
+│       ├── common.sh               # log_*, resource_exists, secret_exists, ...
+│       └── kafka-startup.sh        # Startup-script inyectado a la Kafka VM
 ├── tests/
 │   ├── test_cloud_armor.sh         # Tests de reglas WAF
 │   └── test_firewall_rules.sh      # Tests de reglas de firewall
+├── deploy-all.sh                   # Orquestador: ejecuta scripts/01..10 en orden
+├── destroy-all.sh                  # Teardown idempotente del ambiente
 ├── CLAUDE.md                       # Contexto para Claude Code
 ├── CONTEXT_USER_SERVICES.md        # Contexto de integracion para user-services
 └── README.md
@@ -295,34 +356,33 @@ GCP_PROJECT_ID=otro-proyecto bash cloud-armor/security-policy.sh
 
 ## Orden de Despliegue
 
-Los scripts deben ejecutarse en este orden para respetar dependencias:
+Forma recomendada — usar el orquestador parametrizado por ambiente:
 
 ```bash
-# 1. VPC y Subnets (base de red)
-bash firewall/vpc-setup.sh
+source config/environments/dev.env && bash deploy-all.sh
+# o
+source config/environments/prod.env && bash deploy-all.sh
+```
 
-# 2. Reglas de Firewall (segmentacion)
-bash firewall/firewall-rules.sh
+Equivale a ejecutar `scripts/01..10` en este orden:
 
-# 3. Acceso privado a servicios managed
-bash firewall/private-access.sh
+```bash
+01-enable-apis.sh        # Habilitar APIs de GCP
+02-vpc-setup.sh          # VPC + 3 subnets + VPC Access Connector
+03-firewall-rules.sh     # Reglas firewall (incluye fw-allow-iap-kafka)
+04-private-access.sh     # Private Service Connection (Cloud SQL privado)
+05-cloud-armor.sh        # WAF + rate limit + geo-block
+06-database.sh           # Cloud SQL PostgreSQL
+07-kafka.sh              # Kafka VM (broker en subnet-data, IP fija)
+08-gateway.sh            # API Gateway (requiere URLs de Cloud Run)
+09-load-balancer.sh      # IP estatica + LB + Cloud Armor asociado
+10-tests.sh              # Validacion smoke
+```
 
-# 4. Cloud Armor (WAF en el borde)
-bash cloud-armor/security-policy.sh
-bash cloud-armor/adaptive-protection.sh
+Para revertir todo:
 
-# 5. Base de datos
-bash database/setup-cloudsql.sh
-
-# 6. API Gateway (requiere URLs de Cloud Run)
-bash deploy/deploy-gateway.sh
-
-# 7. Load Balancer + IP estatica + Cloud Armor asociado
-bash deploy/deploy-load-balancer.sh
-
-# 8. Verificacion
-bash tests/test_cloud_armor.sh
-bash tests/test_firewall_rules.sh
+```bash
+source config/environments/dev.env && bash destroy-all.sh
 ```
 
 ---

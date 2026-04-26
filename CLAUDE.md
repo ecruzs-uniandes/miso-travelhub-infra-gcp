@@ -43,8 +43,9 @@ travelhub-gateway/
 2. **VPC Firewall** — Segmentación de red — DESPLEGADO
 3. **API Gateway** — Validación JWT — DESPLEGADO
 4. **Cloud SQL** — PostgreSQL 15 (IP privada 10.100.0.3) — DESPLEGADO
-5. **Load Balancer** — IP estática + SSL + Cloud Armor asociado — DESPLEGADO
-6. **Chain of Responsibility** — Middleware Python (RBAC, MFA, rate limit app) — va en cada microservicio
+5. **Kafka VM** — Compute Engine, broker self-managed en `subnet-data` (IP `10.10.3.3` dev / `10.20.3.3` prod) — DESPLEGADO
+6. **Load Balancer** — IP estática + SSL + Cloud Armor asociado — DESPLEGADO
+7. **Chain of Responsibility** — Middleware Python (RBAC, MFA, rate limit app) — va en cada microservicio
 
 ## URLs del entorno DEV
 
@@ -91,6 +92,17 @@ Pendientes (PLACEHOLDER en openapi-spec.yaml):
 - IP privada: `10.100.0.3` (sin IP pública)
 - BD: `travelhub`, usuario: `travelhub_app`
 - Accesible solo desde subnet-services via VPC connector
+
+## Kafka VM (Compute Engine)
+
+- Instancia: `${PREFIX}-kafka` (e2-small, Ubuntu 22.04, 20 GB pd-balanced)
+- Subnet: `subnet-data` con IP privada fija `10.10.3.3` (dev) / `10.20.3.3` (prod)
+- **Sin IP pública** — admin via IAP tunnel (puerto 8080 = Kafka UI, 22 = SSH)
+- Stack: docker-compose con `cp-zookeeper:7.6.0` + `cp-kafka:7.6.0` + `provectuslabs/kafka-ui` + container `kafka-init` que crea topics
+- Topics auto-creados: `pms-sync-queue` (3 partitions), `pms-sync-dlq` (1 partition)
+- Bootstrap servers (`<ip>:9092`) → secret `${PREFIX}-kafka-bootstrap-servers` (lo consumen pms-integration y pms-sync-worker)
+- Startup-script en `scripts/lib/kafka-startup.sh` (verbatim, no editar a la ligera)
+- Firewall: `fw-allow-svc-to-data` (port 9092 desde subnet-services) + `fw-allow-iap-kafka` (P50, IAP → 22+8080)
 
 ## Reglas de trabajo
 

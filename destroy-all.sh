@@ -30,8 +30,9 @@ echo ""
 echo "Recursos a eliminar:"
 echo "  - Load Balancer (forwarding rule, proxy, cert, url-map, backend, NEG, IP)"
 echo "  - API Gateway (gateway, api-config, api)"
-echo "  - Cloud SQL + Secret Manager"
+echo "  - Cloud SQL + Secret Manager (db-password, kafka-bootstrap-servers)"
 echo "  - Cloud Armor security policy"
+echo "  - Kafka VM (Compute Engine)"
 echo "  - Private Service Connection"
 echo "  - Reglas de Firewall"
 echo "  - VPC (connector, subnets, VPC)"
@@ -52,7 +53,7 @@ echo ""
 # ================================================================
 
 # ── 1. Load Balancer — Forwarding Rule ──
-log_step "1/16 Eliminando Forwarding Rule"
+log_step "1/17 Eliminando Forwarding Rule"
 if resource_exists "forwarding-rules" "${LB_FWD_RULE_NAME}" "--global"; then
   log_info "Eliminando forwarding rule '${LB_FWD_RULE_NAME}'..."
   gcloud compute forwarding-rules delete "${LB_FWD_RULE_NAME}" \
@@ -65,7 +66,7 @@ else
 fi
 
 # ── 2. HTTPS Proxy ──
-log_step "2/16 Eliminando HTTPS Proxy"
+log_step "2/17 Eliminando HTTPS Proxy"
 if resource_exists "target-https-proxies" "${LB_PROXY_NAME}" "--global"; then
   log_info "Eliminando HTTPS proxy '${LB_PROXY_NAME}'..."
   gcloud compute target-https-proxies delete "${LB_PROXY_NAME}" \
@@ -78,7 +79,7 @@ else
 fi
 
 # ── 3. SSL Certificate ──
-log_step "3/16 Eliminando SSL Certificate"
+log_step "3/17 Eliminando SSL Certificate"
 if resource_exists "ssl-certificates" "${LB_CERT_NAME}" "--global"; then
   log_info "Eliminando certificado SSL '${LB_CERT_NAME}'..."
   gcloud compute ssl-certificates delete "${LB_CERT_NAME}" \
@@ -91,7 +92,7 @@ else
 fi
 
 # ── 4. URL Map ──
-log_step "4/16 Eliminando URL Map"
+log_step "4/17 Eliminando URL Map"
 if resource_exists "url-maps" "${LB_URL_MAP_NAME}" "--global"; then
   log_info "Eliminando URL map '${LB_URL_MAP_NAME}'..."
   gcloud compute url-maps delete "${LB_URL_MAP_NAME}" \
@@ -104,7 +105,7 @@ else
 fi
 
 # ── 5. Backend Service (primero remover Cloud Armor) ──
-log_step "5/16 Eliminando Backend Service"
+log_step "5/17 Eliminando Backend Service"
 if resource_exists "backend-services" "${LB_BACKEND_NAME}" "--global"; then
   log_info "Removiendo Cloud Armor del backend service..."
   gcloud compute backend-services update "${LB_BACKEND_NAME}" \
@@ -123,7 +124,7 @@ else
 fi
 
 # ── 6. NEG ──
-log_step "6/16 Eliminando Network Endpoint Group"
+log_step "6/17 Eliminando Network Endpoint Group"
 if resource_exists "network-endpoint-groups" "${LB_NEG_NAME}" "--global"; then
   log_info "Eliminando NEG '${LB_NEG_NAME}'..."
   gcloud compute network-endpoint-groups delete "${LB_NEG_NAME}" \
@@ -136,7 +137,7 @@ else
 fi
 
 # ── 7. IP Estatica ──
-log_step "7/16 Eliminando IP estatica"
+log_step "7/17 Eliminando IP estatica"
 if resource_exists "addresses" "${LB_IP_NAME}" "--global"; then
   log_info "Eliminando IP estatica '${LB_IP_NAME}'..."
   gcloud compute addresses delete "${LB_IP_NAME}" \
@@ -149,7 +150,7 @@ else
 fi
 
 # ── 8. API Gateway ──
-log_step "8/16 Eliminando API Gateway"
+log_step "8/17 Eliminando API Gateway"
 
 if gateway_exists "${API_GATEWAY_NAME}" "${GCP_REGION}"; then
   log_info "Eliminando gateway '${API_GATEWAY_NAME}'..."
@@ -191,7 +192,7 @@ else
 fi
 
 # ── 9. Cloud SQL ──
-log_step "9/16 Eliminando Cloud SQL"
+log_step "9/17 Eliminando Cloud SQL"
 if sql_instance_exists "${DB_INSTANCE_NAME}"; then
   log_info "Eliminando instancia Cloud SQL '${DB_INSTANCE_NAME}' (puede tardar varios minutos)..."
   gcloud sql instances delete "${DB_INSTANCE_NAME}" \
@@ -203,20 +204,21 @@ else
 fi
 
 # ── 10. Secret Manager ──
-log_step "10/16 Eliminando secrets de Secret Manager"
-SECRET_NAME="${PREFIX}-db-password"
-if secret_exists "${SECRET_NAME}"; then
-  log_info "Eliminando secret '${SECRET_NAME}'..."
-  gcloud secrets delete "${SECRET_NAME}" \
-    --quiet \
-    --project="${GCP_PROJECT_ID}"
-  log_success "Secret eliminado"
-else
-  log_warn "Secret '${SECRET_NAME}' no existe — omitiendo"
-fi
+log_step "10/17 Eliminando secrets de Secret Manager"
+for SECRET_NAME in "${PREFIX}-db-password" "${PREFIX}-kafka-bootstrap-servers"; do
+  if secret_exists "${SECRET_NAME}"; then
+    log_info "Eliminando secret '${SECRET_NAME}'..."
+    gcloud secrets delete "${SECRET_NAME}" \
+      --quiet \
+      --project="${GCP_PROJECT_ID}"
+    log_success "Secret '${SECRET_NAME}' eliminado"
+  else
+    log_warn "Secret '${SECRET_NAME}' no existe — omitiendo"
+  fi
+done
 
 # ── 11. Cloud Armor — Reglas y Policy ──
-log_step "11/16 Eliminando Cloud Armor"
+log_step "11/17 Eliminando Cloud Armor"
 if armor_policy_exists "${CLOUD_ARMOR_POLICY}"; then
   log_info "Eliminando reglas de Cloud Armor (1000-3000)..."
   for priority in 1000 1100 1200 1300 1400 1500 2000 2100 2200 3000; do
@@ -237,8 +239,23 @@ else
   log_warn "Security policy '${CLOUD_ARMOR_POLICY}' no existe — omitiendo"
 fi
 
-# ── 12. Private Service Connection ──
-log_step "12/16 Eliminando Private Service Connection"
+# ── 12. Kafka VM ──
+log_step "12/17 Eliminando Kafka VM"
+if gcloud compute instances describe "${KAFKA_VM_NAME}" \
+    --zone="${KAFKA_VM_ZONE}" \
+    --project="${GCP_PROJECT_ID}" &>/dev/null; then
+  log_info "Eliminando VM '${KAFKA_VM_NAME}' en ${KAFKA_VM_ZONE}..."
+  gcloud compute instances delete "${KAFKA_VM_NAME}" \
+    --zone="${KAFKA_VM_ZONE}" \
+    --quiet \
+    --project="${GCP_PROJECT_ID}"
+  log_success "VM '${KAFKA_VM_NAME}' eliminada"
+else
+  log_warn "VM '${KAFKA_VM_NAME}' no existe — omitiendo"
+fi
+
+# ── 13. Private Service Connection ──
+log_step "13/17 Eliminando Private Service Connection"
 
 PEERING_EXISTS=$(gcloud services vpc-peerings list \
   --service=servicenetworking.googleapis.com \
@@ -269,10 +286,11 @@ else
   log_warn "Rango IP privado '${PRIVATE_RANGE_NAME}' no existe — omitiendo"
 fi
 
-# ── 13. Firewall Rules ──
-log_step "13/16 Eliminando reglas de Firewall"
+# ── 14. Firewall Rules ──
+log_step "14/17 Eliminando reglas de Firewall"
 
 FW_RULES=(
+  "${PREFIX}-fw-allow-iap-kafka"
   "${PREFIX}-fw-deny-ssh"
   "${PREFIX}-fw-allow-https-lb"
   "${PREFIX}-fw-allow-health-checks"
@@ -296,8 +314,8 @@ for rule in "${FW_RULES[@]}"; do
   fi
 done
 
-# ── 14. VPC Connector ──
-log_step "14/16 Eliminando VPC Connector"
+# ── 15. VPC Connector ──
+log_step "15/17 Eliminando VPC Connector"
 if connector_exists "${VPC_CONNECTOR_NAME}" "${GCP_REGION}"; then
   log_info "Eliminando VPC connector '${VPC_CONNECTOR_NAME}'..."
   gcloud compute networks vpc-access connectors delete "${VPC_CONNECTOR_NAME}" \
@@ -309,8 +327,8 @@ else
   log_warn "VPC connector '${VPC_CONNECTOR_NAME}' no existe — omitiendo"
 fi
 
-# ── 15. Subnets ──
-log_step "15/16 Eliminando Subnets"
+# ── 16. Subnets ──
+log_step "16/17 Eliminando Subnets"
 
 for subnet in "${SUBNET_DATA_NAME}" "${SUBNET_SERVICES_NAME}" "${SUBNET_PUBLIC_NAME}"; do
   if subnet_exists "${subnet}" "${GCP_REGION}"; then
@@ -325,8 +343,8 @@ for subnet in "${SUBNET_DATA_NAME}" "${SUBNET_SERVICES_NAME}" "${SUBNET_PUBLIC_N
   fi
 done
 
-# ── 16. VPC ──
-log_step "16/16 Eliminando VPC"
+# ── 17. VPC ──
+log_step "17/17 Eliminando VPC"
 if resource_exists "networks" "${VPC_NAME}"; then
   log_info "Eliminando VPC '${VPC_NAME}'..."
   gcloud compute networks delete "${VPC_NAME}" \
